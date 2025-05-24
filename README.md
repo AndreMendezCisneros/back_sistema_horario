@@ -2,6 +2,23 @@
 
 Este documento describe la API RESTful para el Sistema de Gestión de Horarios de la institución La Pontificia.
 
+# Guía de instalación y configuración del proyecto
+
+## 1. Crear y activar un entorno virtual (opcional pero recomendado)
+Para crear el entorno virtual, ejecuta:
+```bash
+python -m venv venv
+venv\Scripts\activate
+source venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py seed_data
+python manage.py runserver
+
+Este es un ejemplo completo en código Markdown que puedes copiar y pegar en tu archivo `.md`. ¡Espero que te resulte útil! 
+
+Si deseas más información o algún ajuste adicional, no dudes en decírmelo.
+```
 ## 1. Configuración Base
 
 ### URL Base
