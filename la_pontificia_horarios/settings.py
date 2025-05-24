@@ -193,8 +193,9 @@ SIMPLE_JWT = {
 
 # CORS Settings (para permitir que tu frontend React se comunique)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8080",  # Asumiendo que React corre en el puerto 3000
-    "http://192.168.18.30:8080",
+    "http://localhost:3000", # Your React frontend (Vite default port)
+    "http://192.168.18.30:3000",
+    # Add other origins if needed (e.g., your deployed frontend URL)
 ]
 # O para ser más permisivo durante el desarrollo (no recomendado para producción):
 # CORS_ORIGIN_ALLOW_ALL = True
