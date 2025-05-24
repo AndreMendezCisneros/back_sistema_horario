@@ -123,7 +123,7 @@ class Command(BaseCommand):
         Group.objects.get_or_create(name='DocentesStaff')
 
     def _crear_unidades_academicas(self):
-        unidades_data = ["Facultad de Ingeniería", "Escuela de Negocios", "Instituto de Idiomas"]
+        unidades_data = ["Escuela superior la pontificia", "La pontificia", "Instituto de Idiomas"]
         unidades = []
         for i in range(NUM_UNIDADES_ACADEMICAS):
             nombre = unidades_data[i % len(unidades_data)] + (f" {i//len(unidades_data) + 1}" if i >= len(unidades_data) else "")
