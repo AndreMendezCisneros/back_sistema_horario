@@ -1,3 +1,4 @@
+#la_pontificia_horarios/setting.py
 """
 Django settings for la_pontificia_horarios project.
 
@@ -42,19 +43,19 @@ INSTALLED_APPS = [
     # ... otras apps ...
 
     # Third-party apps
+    'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
-    'corsheaders',
     'django_filters',
-    'apps.academic_setup',
     'apps.users',
+    'apps.academic_setup',
     'apps.scheduling',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware', # <--- POSICIÓN CORREGIDA: Debe ir después de SecurityMiddleware
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware', # CORS
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -86,7 +87,6 @@ WSGI_APPLICATION = 'la_pontificia_horarios.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Database (PostgreSQL) - RE-05 menciona SQL Server, pero el usuario pidió PostgreSQL. Adaptar si es necesario.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -120,17 +120,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # CELERY SETTINGS
-# Asegúrate de que RabbitMQ esté corriendo y accesible.
-# La URL por defecto para un RabbitMQ local con usuario/contraseña guest/guest.
 CELERY_BROKER_URL = 'amqp://guest:guest@localhost:5672//'
-
-# Opcional: Si quieres almacenar los resultados de las tareas
-# Puedes usar rpc (AMQP backend), Redis, o la base de datos Django.
-# rpc:// es bueno para empezar si ya usas RabbitMQ como broker.
 CELERY_RESULT_BACKEND = 'rpc://'
-# Alternativa para resultados (ej. usando la base de datos Django, requiere instalar django-celery-results):
-# CELERY_RESULT_BACKEND = 'django-db'
-
 
 
 # Internationalization
@@ -161,23 +152,23 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 10
 }
 
-# Simple JWT settings (RE-03: autenticación por tokens)
+# Simple JWT settings
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60), # Duración del token de acceso
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),    # Duración del token de refresco
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True, # Actualiza el campo last_login del usuario
+    'UPDATE_LAST_LOGIN': True,
 
     'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY, # Usa la misma SECRET_KEY o una diferente para JWT
+    'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
     'AUDIENCE': None,
     'ISSUER': None,
 
-    'AUTH_HEADER_TYPES': ('Bearer',), # Prefijo en el header Authorization: Bearer <token>
+    'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
-    'USER_ID_FIELD': 'id', # Campo del modelo Usuario para identificar al usuario
+    'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
@@ -192,12 +183,14 @@ SIMPLE_JWT = {
 
 
 # CORS Settings (para permitir que tu frontend React se comunique)
+# Opcional: Descomenta CORS_ALLOW_ALL_ORIGINS = True para pruebas rápidas, pero úsalo con precaución en producción.
+# CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000", # Your React frontend (Vite default port)
-    "http://192.168.18.30:3000",
-    # Add other origins if needed (e.g., your deployed frontend URL)
+    "http://localhost:8080",  # <--- Asumiendo que tu frontend Vite se ejecuta en este puerto
+    "http://127.0.0.1:8080",  # <--- Para acceso vía IP local
+    # Si tu frontend se ejecuta en otros puertos o IPs, añádelos aquí:
+    # "http://localhost:3000",
+    # "http://192.168.18.30:5173",
+    # "http://192.168.18.30:3000",
 ]
-# O para ser más permisivo durante el desarrollo (no recomendado para producción):
-# CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_CREDENTIALS = True
-

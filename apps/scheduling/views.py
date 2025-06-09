@@ -1,3 +1,4 @@
+# apps/scheduling/view.py
 from django.db import models # <--- AÑADE O ASEGÚRATE QUE ESTA LÍNEA EXISTA
 
 from rest_framework import viewsets, permissions, status

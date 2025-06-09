@@ -1,3 +1,4 @@
+#apps/users/models.py
 from django.db import models
 from django.contrib.auth.models import AbstractUser # Para un modelo de Usuario personalizado si es necesario
 from apps.academic_setup.models import UnidadAcademica, Especialidades

@@ -1,3 +1,4 @@
+#apps/academic_setup/apps.py
 from django.apps import AppConfig
 
 

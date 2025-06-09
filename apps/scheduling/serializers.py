@@ -1,3 +1,4 @@
+#apps/scheduling/serializers.py
 from rest_framework import serializers
 from .models import Grupos, BloquesHorariosDefinicion, DisponibilidadDocentes, HorariosAsignados, ConfiguracionRestricciones
 from apps.academic_setup.serializers import MateriasSerializer, CarreraSerializer, EspaciosFisicosSerializer

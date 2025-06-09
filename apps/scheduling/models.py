@@ -1,3 +1,4 @@
+#apps/scheduling/models.py
 from django.db import models
 from apps.academic_setup.models import Materias, Carrera, PeriodoAcademico, TiposEspacio, EspaciosFisicos
 from apps.users.models import Docentes

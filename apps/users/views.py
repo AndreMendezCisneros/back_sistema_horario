@@ -1,21 +1,34 @@
+#apps/users/views.py
 from django.contrib.auth.models import User, Group
 from rest_framework import viewsets, permissions, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .models import Docentes, Roles # DocenteEspecialidades
-from .serializers import UserSerializer, UserRegistrationSerializer, DocentesSerializer, RolesSerializer, GroupSerializer
 
-from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import MyTokenObtainPairSerializer # Asegúrate que esta importación sea correcta
+# Importaciones de rest_framework_simplejwt:
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView # <-- TokenObtainPairView sí se importa de views
+
+# Importaciones de tus modelos locales:
+from .models import Docentes, Roles # Aquí sí importas Roles
+
+# Importaciones de tus serializers locales:
+from .serializers import (
+    UserSerializer,
+    UserRegistrationSerializer,
+    DocentesSerializer,
+    RolesSerializer,
+    GroupSerializer,
+    CustomTokenObtainPairSerializer # <-- ¡Este es el nombre correcto!
+)
+
+
 
 # from ..permissions import IsAdminOrSelf # Permiso personalizado
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
-    permission_classes = [AllowAny]  #Permite acceso sin autenticación
+    permission_classes = [AllowAny]   #Permite acceso sin autenticación
     #ppermission_classes = [permissions.IsAdminUser] # Solo admins pueden listar/modificar todos los usuarios
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.AllowAny])
@@ -35,19 +48,19 @@ class UserViewSet(viewsets.ModelViewSet):
 class GroupViewSet(viewsets.ModelViewSet): # Para administrar los grupos de Django
     queryset = Group.objects.all()
     serializer_class = GroupSerializer
-    permission_classes = [AllowAny]  #Permite acceso sin autenticación
+    permission_classes = [AllowAny]   #Permite acceso sin autenticación
     #ppermission_classes = [permissions.IsAuthenticated]
 
 class RolesViewSet(viewsets.ModelViewSet):
     queryset = Roles.objects.all()
     serializer_class = RolesSerializer
-    permission_classes = [AllowAny]  #Permite acceso sin autenticación
+    permission_classes = [AllowAny]   #Permite acceso sin autenticación
     #permission_classes = [permissions.IsAuthenticated]
 
 class DocentesViewSet(viewsets.ModelViewSet):
     queryset = Docentes.objects.select_related('usuario', 'unidad_principal').prefetch_related('especialidades').all()
     serializer_class = DocentesSerializer
-    permission_classes = [AllowAny]  #Permite acceso sin autenticación
+    permission_classes = [AllowAny]   #Permite acceso sin autenticación
     #permission_classes = [permissions.IsAuthenticated]
 
     # Ejemplo de filtrado: /api/users/docentes/?unidad_id=1&especialidad_id=2
@@ -63,7 +76,5 @@ class DocentesViewSet(viewsets.ModelViewSet):
 
 # Para login y refresh de tokens
 class CustomTokenObtainPairView(TokenObtainPairView):
-    # Puedes personalizar el serializer aquí si necesitas añadir más datos al token
-    serializer_class = MyTokenObtainPairSerializer
+    serializer_class = CustomTokenObtainPairSerializer
     pass
-

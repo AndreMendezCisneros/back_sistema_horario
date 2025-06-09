@@ -1,8 +1,9 @@
+#apps/users/serializers.py
 from django.contrib.auth.models import User, Group
 from rest_framework import serializers
 from .models import Docentes, Roles, DocenteEspecialidades # SesionesUsuario
 from apps.academic_setup.serializers import EspecialidadesSerializer # Para anidar
-from apps.users.models import Especialidades
+from apps.users.models import Especialidades # Asegúrate de que Especialidades se importe correctamente
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
@@ -94,45 +95,42 @@ class DocentesSerializer(serializers.ModelSerializer):
             instance.especialidades.set(especialidad_data)
         return instance
 
-class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-
-        # Puedes añadir claims personalizados al payload del token de acceso aquí si lo deseas
-        # Estos datos estarían DENTRO del token JWT decodificado.
-        # token['username'] = user.username
-        # token['custom_claim'] = 'valor_personalizado'
+        # Add custom claims
+        token['username'] = user.username
+        token['email'] = user.email
+        # Aquí podrías añadir un campo personalizado si lo necesitas en el token mismo
         return token
 
     def validate(self, attrs):
-        # La llamada a super().validate(attrs) ya te da los tokens 'access' y 'refresh'
         data = super().validate(attrs)
 
-        # Ahora, añadimos la información extra del usuario a la respuesta JSON
-        # que se enviará JUNTO con los tokens.
-        data['user_id'] = self.user.id
-        data['username'] = self.user.username
-        data['email'] = self.user.email
-        data['first_name'] = self.user.first_name
-        data['last_name'] = self.user.last_name
-        data['is_staff'] = self.user.is_staff # Útil si los coordinadores son staff pero no superusers
-        data['is_superuser'] = self.user.is_superuser # Para el rol de Administrador principal
+        # Accede al usuario autenticado
+        user = self.user
 
-        # Obtenemos los nombres de los grupos de Django a los que pertenece el usuario
-        # Estos grupos los creamos en el `seed_data.py` (ej: 'Admins', 'Coordinadores', 'DocentesStaff')
-        user_groups = self.user.groups.all().values_list('name', flat=True)
-        data['groups'] = list(user_groups)
+        # Aquí agregas los datos que necesitas en la respuesta de login
+        # del campo 'user' que tu frontend espera.
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            # Convierte los grupos a una lista de nombres de strings
+            'groups': [group.name for group in user.groups.all()],
+            # Si Docente está relacionado, puedes incluir sus especialidades aquí
+            # Ejemplo (asumiendo una relación inversa 'docente_profile' o 'docente'):
+            # 'especialidades_nombres': []
+        }
+        # Si el usuario es un docente y tiene un perfil de docente asociado
+        if hasattr(user, 'docente') and user.docente:
+            user_data['especialidades_nombres'] = [
+                esp.nombre for esp in user.docente.especialidades.all()
+            ]
 
-        # Si tuvieras un campo 'rol' FK directo en tu modelo User personalizado (no es el caso ahora):
-        # if hasattr(self.user, 'rol') and self.user.rol:
-        #     data['custom_rol_id'] = self.user.rol.rol_id
-        #     data['custom_rol_nombre'] = self.user.rol.nombre_rol
-
-        # Si el usuario es un docente y quieres info específica del perfil Docente:
-        if hasattr(self.user, 'perfil_docente') and self.user.perfil_docente:
-            data['docente_id'] = self.user.perfil_docente.docente_id
-            data['codigo_docente'] = self.user.perfil_docente.codigo_docente
-            # Puedes añadir más campos del perfil Docente si son necesarios en el login.
-
+        data['user'] = user_data
         return data
+    
