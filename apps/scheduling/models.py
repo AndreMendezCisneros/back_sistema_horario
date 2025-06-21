@@ -8,7 +8,7 @@ class Grupos(models.Model):
 
     grupo_id = models.AutoField(primary_key=True)
     codigo_grupo = models.CharField(max_length=50)
-    materia = models.ForeignKey(Materias, on_delete=models.CASCADE, related_name='grupos')
+    materias = models.ManyToManyField(Materias, related_name='grupos')
     carrera = models.ForeignKey(Carrera, on_delete=models.CASCADE, related_name='grupos')
     periodo = models.ForeignKey(PeriodoAcademico, on_delete=models.CASCADE, related_name='grupos')
     numero_estudiantes_estimado = models.IntegerField(blank=True, null=True)
@@ -20,7 +20,8 @@ class Grupos(models.Model):
     )
 
     def __str__(self):
-        return f"{self.codigo_grupo} ({self.materia.nombre_materia}) - {self.periodo.nombre_periodo}"
+        nombre_materias = ", ".join([m.nombre_materia for m in self.materias.all()])
+        return f"{self.codigo_grupo} ({nombre_materias}) - {self.periodo.nombre_periodo}"
 
     class Meta:
         unique_together = ('codigo_grupo', 'periodo')
@@ -80,6 +81,7 @@ class HorariosAsignados(models.Model):
 
     horario_id = models.AutoField(primary_key=True)
     grupo = models.ForeignKey(Grupos, on_delete=models.CASCADE, related_name='clases_programadas')
+    materia = models.ForeignKey(Materias, on_delete=models.CASCADE, related_name='clases_impartidas', null=True)
     docente = models.ForeignKey(Docentes, on_delete=models.CASCADE, related_name='clases_asignadas')
     espacio = models.ForeignKey(EspaciosFisicos, on_delete=models.CASCADE, related_name='horarios_en_espacio')
     periodo = models.ForeignKey(PeriodoAcademico, on_delete=models.CASCADE, related_name='horarios_del_periodo') # Denormalizado para facilidad de consulta
@@ -89,7 +91,8 @@ class HorariosAsignados(models.Model):
     observaciones = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"{self.grupo} en {self.espacio} con {self.docente} ({dict(self.DIA_SEMANA_CHOICES)[self.dia_semana]} {self.bloque_horario.hora_inicio})"
+        materia_str = self.materia.codigo_materia if self.materia else "SIN_MATERIA"
+        return f"{self.grupo.codigo_grupo} / {materia_str} en {self.espacio} ({dict(self.DIA_SEMANA_CHOICES)[self.dia_semana]} {self.bloque_horario.hora_inicio})"
 
     class Meta:
         # RD01, RD02: Cruces de horarios
@@ -97,6 +100,7 @@ class HorariosAsignados(models.Model):
             ('docente', 'periodo', 'dia_semana', 'bloque_horario'),
             ('espacio', 'periodo', 'dia_semana', 'bloque_horario'),
             ('grupo', 'periodo', 'dia_semana', 'bloque_horario'), # Un grupo no puede tener dos clases distintas al mismo tiempo
+            ('grupo', 'materia', 'periodo', 'dia_semana', 'bloque_horario'), # Una materia de un grupo no se puede programar dos veces en el mismo bloque
         ]
         verbose_name = "Horario Asignado"
         verbose_name_plural = "Horarios Asignados"

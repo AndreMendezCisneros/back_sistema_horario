@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from . import views
 
 router = DefaultRouter()
-router.register(r'grupos', views.GruposViewSet)
+router.register(r'grupos', views.GruposViewSet, basename='grupos')
 router.register(r'bloques-horarios', views.BloquesHorariosDefinicionViewSet)
 router.register(r'disponibilidad-docentes', views.DisponibilidadDocentesViewSet)
 router.register(r'horarios-asignados', views.HorariosAsignadosViewSet)

@@ -34,7 +34,7 @@ class Carrera(models.Model):
     nombre_carrera = models.CharField(max_length=255)
     codigo_carrera = models.CharField(max_length=20, unique=True, blank=True, null=True)
     horas_totales_curricula = models.IntegerField(blank=True, null=True)
-    unidad = models.ForeignKey(UnidadAcademica, on_delete=models.CASCADE, related_name='carreras')
+    unidad = models.ForeignKey(UnidadAcademica, on_delete=models.PROTECT, related_name='carreras')
 
     def __str__(self):
         return self.nombre_carrera
@@ -48,7 +48,7 @@ class Carrera(models.Model):
 class Ciclo(models.Model):
     ciclo_id = models.AutoField(primary_key=True)
     nombre_ciclo = models.CharField(max_length=100) # Ej: "Primer Semestre", "Ciclo 1", "Año 2"
-    orden = models.IntegerField(help_text="Orden numérico para los ciclos (ej: 1, 2, 3...)", unique=True) # Agregamos unique=True
+    orden = models.IntegerField(help_text="Orden numérico para los ciclos (ej: 1, 2, 3...)")
     carrera = models.ForeignKey(Carrera, on_delete=models.CASCADE, related_name='ciclos')
 
     def __str__(self):
@@ -57,8 +57,8 @@ class Ciclo(models.Model):
     class Meta:
         verbose_name = "Ciclo"
         verbose_name_plural = "Ciclos"
-        unique_together = ('nombre_ciclo', 'carrera')
         ordering = ['orden']
+        unique_together = ('carrera', 'orden')
 
 # Nuevo: Seccion (para la granularidad de los grupos dentro de un ciclo)
 class Seccion(models.Model):

@@ -1,11 +1,11 @@
 # apps/scheduling/service/schedule_generator.py
 import random
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from django.db.models import Q
 import logging
 
 from apps.academic_setup.models import (
-    PeriodoAcademico, Materias, EspaciosFisicos, CarreraMaterias, TiposEspacio, MateriaEspecialidadesRequeridas
+    PeriodoAcademico, Materias, EspaciosFisicos, CarreraMaterias, TiposEspacio, MateriaEspecialidadesRequeridas, Ciclo
 )
 from apps.users.models import Docentes
 from apps.scheduling.models import (
@@ -26,6 +26,15 @@ R_MAX_HORAS_DIA_DOCENTE = "MAX_HORAS_DIA_DOCENTE"
 R_AULA_EXCLUSIVA_MATERIA = "AULA_EXCLUSIVA_MATERIA"
 R_DOCENTE_NO_DISPONIBLE_BLOQUE_ESP = "DOCENTE_NO_DISPONIBLE_BLOQUE_ESP" # Si se quiere bloquear explícitamente un docente de un bloque
 R_NO_CLASES_DIA_TURNO_CARRERA = "NO_CLASES_DIA_TURNO_CARRERA"
+
+
+# Representa la unidad atómica a ser programada: una materia específica para un grupo.
+ClaseParaProgramar = namedtuple('ClaseParaProgramar', [
+    'grupo',
+    'materia',
+    'sesiones_necesarias',
+    'sesiones_programadas'
+])
 
 
 class ScheduleGeneratorService:
@@ -50,6 +59,7 @@ class ScheduleGeneratorService:
         self.horario_parcial_docentes = defaultdict(lambda: defaultdict(list)) # {docente_id: {dia_semana: [bloque_def_id_asignado, ...]}}
         self.horario_parcial_espacios = defaultdict(lambda: defaultdict(list)) # {espacio_id: {dia_semana: [bloque_def_id_asignado, ...]}}
         self.horario_parcial_grupos = defaultdict(lambda: defaultdict(list)) # {grupo_id: {dia_semana: [bloque_def_id_asignado, ...]}}
+        self.horario_parcial_clases = defaultdict(int) # {(grupo_id, materia_id): sesiones_programadas}
 
 
         self._load_initial_data()
@@ -94,22 +104,22 @@ class ScheduleGeneratorService:
             mat_esp_req_map[mer['materia_id']].add(mer['especialidad_id'])
         return mat_esp_req_map
 
-    def _check_hard_configured_constraints(self, grupo, docente, espacio, bloque):
+    def _check_hard_configured_constraints(self, grupo, materia, docente, espacio, bloque):
         """
         Verifica las HARD CONSTRAINTS de la tabla ConfiguracionRestricciones.
-        Devuelve True si se cumplen todas, False si alguna se viola.
+        Ahora recibe 'materia' explícitamente.
         """
         for r in self.all_restricciones_config:
             # Ejemplo 1: Docente X no puede enseñar Materia Y
             if r.codigo_restriccion == "DOCENTE_NO_ENSENA_MATERIA_HARD": # Asumimos que este código es para una hard constraint
-                if r.tipo_aplicacion == "DOCENTE_MATERIA" and r.entidad_id_1 == docente.docente_id and r.entidad_id_2 == grupo.materia_id:
-                    self.logger.debug(f"Conflicto HARD Config: Docente {docente.codigo_docente} no puede enseñar {grupo.materia.codigo_materia}")
+                if r.tipo_aplicacion == "DOCENTE_MATERIA" and docente and r.entidad_id_1 == docente.docente_id and r.entidad_id_2 == materia.materia_id:
+                    self.logger.debug(f"Conflicto HARD Config: Docente {docente.codigo_docente} no puede enseñar {materia.codigo_materia}")
                     return False
 
             # Ejemplo 2: Materia X solo en Aula Y (HARD)
             if r.codigo_restriccion == R_AULA_EXCLUSIVA_MATERIA and r.tipo_aplicacion == "MATERIA":
-                if r.entidad_id_1 == grupo.materia_id and str(espacio.espacio_id) != r.valor_parametro:
-                    self.logger.debug(f"Conflicto HARD Config: Materia {grupo.materia.codigo_materia} debe estar en aula ID {r.valor_parametro}, no en {espacio.nombre_espacio}")
+                if espacio and r.entidad_id_1 == materia.materia_id and str(espacio.espacio_id) != r.valor_parametro:
+                    self.logger.debug(f"Conflicto HARD Config: Materia {materia.codigo_materia} debe estar en aula ID {r.valor_parametro}, no en {espacio.nombre_espacio}")
                     return False
 
             # Ejemplo 3: No clases en un día/turno para una carrera
@@ -125,8 +135,8 @@ class ScheduleGeneratorService:
             # TODO: Añadir lógica para más códigos de restricción HARD
         return True
 
-    def _calculate_soft_constraint_penalties(self, grupo_obj, docente, espacio, bloque):
-        """Calcula penalizaciones por violaciones de SOFT CONSTRAINTS."""
+    def _calculate_soft_constraint_penalties(self, grupo, materia, docente, espacio, bloque):
+        """Calcula penalizaciones por violaciones de SOFT CONSTRAINTS. Ahora recibe 'materia'"""
         penalty = 0
 
         # Preferencia del docente (ya estaba, la mantenemos y ajustamos)
@@ -135,11 +145,11 @@ class ScheduleGeneratorService:
         )
         if preferencia_docente < 0: penalty += (abs(preferencia_docente) * 10)
         elif preferencia_docente == 0: penalty += 5
-        # Si es > 0 (preferido), no se suma o incluso se podría restar (bonificación)
+        # Si es > 0 (preferido), no se podría restar (bonificación)
         # elif preferencia_docente > 0: penalty -= (preferencia_docente * 2)
 
         # Capacidad del aula
-        num_estudiantes = grupo_obj.numero_estudiantes_estimado or 0
+        num_estudiantes = grupo.numero_estudiantes_estimado or 0
         if num_estudiantes > 0: # Solo aplicar si hay estudiantes estimados
             if espacio.capacidad < num_estudiantes:
                 penalty += (num_estudiantes - espacio.capacidad) * 5 # Penalización más alta por falta de espacio
@@ -147,13 +157,13 @@ class ScheduleGeneratorService:
                 penalty += 10
 
         # Turno preferente del grupo
-        if grupo_obj.turno_preferente and grupo_obj.turno_preferente != bloque.turno:
+        if grupo.turno_preferente and grupo.turno_preferente != bloque.turno:
             penalty += 20
 
         # Aplicar ConfiguracionRestricciones de tipo SOFT
         for r in self.all_restricciones_config:
             if r.codigo_restriccion == "PREFERIR_AULA_X_PARA_MATERIA_Y": # Asumir soft
-                if r.tipo_aplicacion == "MATERIA" and r.entidad_id_1 == grupo_obj.materia_id and str(espacio.espacio_id) != r.valor_parametro:
+                if r.tipo_aplicacion == "MATERIA" and r.entidad_id_1 == materia.materia_id and str(espacio.espacio_id) != r.valor_parametro:
                     penalty += 15 # Penalización por no usar el aula preferida
 
             if r.codigo_restriccion == "EVITAR_HUECOS_LARGOS_DOCENTE": # Soft, requiere lógica más compleja
@@ -165,37 +175,38 @@ class ScheduleGeneratorService:
             # TODO: Añadir lógica para más códigos de restricción SOFT
         return penalty
 
-    def _prioritize_grupos(self, grupos_del_turno):
-        self.logger.debug(f"Priorizando {len(grupos_del_turno)} grupos para el turno...")
+    def _crear_lista_clases_para_programar(self, grupos_del_turno):
+        self.logger.debug(f"Creando lista de clases a programar desde {len(grupos_del_turno)} grupos...")
 
-        grupos_info_con_sesiones = []
+        clases_a_programar = []
         for g in grupos_del_turno:
-            horas_materia = g.materia.horas_totales
-            sesiones_necesarias = 0
-            if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
-                sesiones_necesarias = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
-            elif horas_materia > 0:
-                sesiones_necesarias = 1
+            for materia_obj in g.materias.all(): # Iterar sobre todas las materias del grupo
+                horas_materia = materia_obj.horas_totales
+                sesiones_necesarias = 0
+                if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
+                    sesiones_necesarias = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
+                elif horas_materia > 0:
+                    sesiones_necesarias = 1
 
-            grupos_info_con_sesiones.append({
-                'objeto': g,
-                'ciclo': g.ciclo_semestral or 99, # Usar el campo del modelo, fallback a 99
-                'sesiones_necesarias': sesiones_necesarias,
-                'sesiones_programadas': 0
-            })
+                if sesiones_necesarias > 0:
+                    clase = ClaseParaProgramar(
+                        grupo=g,
+                        materia=materia_obj,
+                        sesiones_necesarias=sesiones_necesarias,
+                        sesiones_programadas=0
+                    )
+                    clases_a_programar.append(clase)
 
-        def sort_key(grupo_info_dict):
-            grupo = grupo_info_dict['objeto']
-            ciclo = grupo_info_dict['ciclo']
-            requiere_lab_especifico = 1 if grupo.materia.requiere_tipo_espacio_especifico else 0
-            sesiones_req = grupo_info_dict['sesiones_necesarias']
-            # Más criterios: ej. número de restricciones asociadas (requeriría pre-cálculo)
-            # num_restricciones_especificas = len([r for r in self.all_restricciones_config if r.entidad_id_1 == grupo.grupo_id and r.tipo_aplicacion == "GRUPO"])
-            return (ciclo, -requiere_lab_especifico, -sesiones_req, grupo.grupo_id)
+        def sort_key(clase: ClaseParaProgramar):
+            ciclo = clase.grupo.ciclo_semestral or 99
+            requiere_lab_especifico = 1 if clase.materia.requiere_tipo_espacio_especifico else 0
+            # num_restricciones = ... (lógica más compleja si se necesita)
+            return (ciclo, -requiere_lab_especifico, -clase.sesiones_necesarias, clase.grupo.grupo_id, clase.materia.materia_id)
 
-        return sorted(grupos_info_con_sesiones, key=sort_key)
+        self.logger.info(f"Se generaron {len(clases_a_programar)} clases únicas para programar.")
+        return sorted(clases_a_programar, key=sort_key)
 
-    def _get_docentes_candidatos(self, materia: Materias, bloque: BloquesHorariosDefinicion, grupo: Grupos): # Añadido grupo
+    def _get_docentes_candidatos(self, materia: Materias, grupo: Grupos, bloque: BloquesHorariosDefinicion): # Añadido grupo
         candidatos = []
         especialidades_requeridas = self.materia_especialidades_req_map.get(materia.materia_id, set())
 
@@ -225,7 +236,7 @@ class ScheduleGeneratorService:
                 self.logger.debug(f"Docente {docente.codigo_docente} ha alcanzado max sesiones ({max_sesiones_dia}) para día {bloque.dia_semana}")
                 continue
 
-            if not self._check_hard_configured_constraints(grupo, docente, None, bloque): # Chequear restricciones que solo involucran docente/grupo/bloque
+            if not self._check_hard_configured_constraints(grupo, materia, docente, None, bloque): # Chequear restricciones que solo involucran docente/grupo/bloque
                 continue
 
             candidatos.append(docente)
@@ -243,7 +254,7 @@ class ScheduleGeneratorService:
                 continue
             if espacio.capacidad < num_estudiantes:
                 continue
-            if not self._check_hard_configured_constraints(grupo, None, espacio, bloque): # Chequear restricciones que solo involucran espacio/grupo/bloque
+            if not self._check_hard_configured_constraints(grupo, materia, None, espacio, bloque): # Chequear restricciones que solo involucran espacio/grupo/bloque
                 continue
             candidatos.append(espacio)
 
@@ -251,123 +262,258 @@ class ScheduleGeneratorService:
         # random.shuffle(candidatos)
         return sorted(candidatos, key=lambda e: abs(e.capacidad - num_estudiantes))
 
-    def _find_best_assignment_for_session(self, grupo_info, bloques_del_turno):
-        grupo_obj = grupo_info['objeto']
-        materia = grupo_obj.materia
-        mejor_asignacion_info = None
-        mejor_score = float('inf')
+    def _find_best_assignment_for_session(self, clase: ClaseParaProgramar, bloques_del_turno):
+        """Intenta encontrar el mejor docente, espacio y bloque para una sesión de una clase."""
+        grupo = clase.grupo
+        materia = clase.materia
+        mejor_opcion = None
+        menor_penalizacion = float('inf')
 
-        # Iterar sobre bloques candidatos (podrían ser pre-filtrados)
-        for bloque_cand in bloques_del_turno:
-            # Obtener docentes candidatos para esta materia, grupo y bloque
-            docentes_candidatos = self._get_docentes_candidatos(materia, bloque_cand, grupo_obj)
-            if not docentes_candidatos: continue
+        for bloque in bloques_del_turno:
+            # 1. Verificar si el bloque ya está ocupado para el grupo
+            if bloque.bloque_def_id in self.horario_parcial_grupos.get(grupo.grupo_id, {}).get(bloque.dia_semana, []):
+                continue
 
-            # Obtener espacios candidatos para esta materia, grupo y bloque
-            espacios_candidatos = self._get_espacios_candidatos(materia, grupo_obj, bloque_cand)
-            if not espacios_candidatos: continue
+            # 2. Obtener candidatos (docentes y espacios)
+            docentes_candidatos = self._get_docentes_candidatos(materia, grupo, bloque)
+            espacios_candidatos = self._get_espacios_candidatos(materia, grupo, bloque)
 
-            for docente_cand in docentes_candidatos:
-                for espacio_cand in espacios_candidatos:
-                    # 1. Verificar Hard Conflicts del validador (cruces básicos)
-                    hard_conflict_details = self.validator.check_slot_conflict(
-                        docente_id=docente_cand.docente_id,
-                        espacio_id=espacio_cand.espacio_id,
-                        grupo_id=grupo_obj.grupo_id,
-                        dia_semana=bloque_cand.dia_semana,
-                        bloque_id=bloque_cand.bloque_def_id
-                    )
-                    if hard_conflict_details:
-                        self.logger.debug(f"  Validador Conflict: G:{grupo_obj.codigo_grupo} D:{docente_cand.codigo_docente} E:{espacio_cand.nombre_espacio} B:{bloque_cand.nombre_bloque} - {hard_conflict_details['message']}")
+            if not docentes_candidatos or not espacios_candidatos:
+                continue
+
+            # 3. Evaluar combinaciones para encontrar la de menor penalización
+            for docente in docentes_candidatos:
+                # Verificar si el docente está ocupado en ese bloque
+                if bloque.bloque_def_id in self.horario_parcial_docentes.get(docente.docente_id, {}).get(bloque.dia_semana, []):
+                    continue
+
+                for espacio in espacios_candidatos:
+                    # Verificar si el espacio está ocupado en ese bloque
+                    if bloque.bloque_def_id in self.horario_parcial_espacios.get(espacio.espacio_id, {}).get(bloque.dia_semana, []):
                         continue
 
-                    # 2. Verificar Hard Constraints de `ConfiguracionRestricciones`
-                    if not self._check_hard_configured_constraints(grupo_obj, docente_cand, espacio_cand, bloque_cand):
+                    # 3.1 Verificar Hard Constraints (ya se hace dentro de get_candidatos, pero podemos re-verificar por si acaso)
+                    if not self._check_hard_configured_constraints(grupo, materia, docente, espacio, bloque):
                         continue
 
-                    # 3. Evaluar Soft Constraints
-                    current_score = self._calculate_soft_constraint_penalties(grupo_obj, docente_cand, espacio_cand, bloque_cand)
+                    # 3.2 Calcular penalizaciones de Soft Constraints
+                    penalizacion = self._calculate_soft_constraint_penalties(grupo, materia, docente, espacio, bloque)
 
-                    if current_score < mejor_score:
-                        mejor_score = current_score
-                        mejor_asignacion_info = {
-                            "grupo": grupo_obj, "docente": docente_cand, "espacio": espacio_cand,
-                            "dia_semana": bloque_cand.dia_semana, "bloque_horario": bloque_cand,
-                            "score": current_score
-                        }
-                        # En una heurística greedy simple, podríamos tomar la primera que encontremos
-                        # return mejor_asignacion_info
+                    if penalizacion < menor_penalizacion:
+                        menor_penalizacion = penalizacion
+                        mejor_opcion = (docente, espacio, bloque)
 
-        return mejor_asignacion_info
+        return mejor_opcion, menor_penalizacion
 
     def generar_horarios_por_turno(self, turno_codigo, ciclos_del_turno):
-        self.logger.info(f"--- Iniciando generación para Turno {turno_codigo} (Ciclos: {ciclos_del_turno}) ---")
-
-        # Obtener grupos que pertenecen a los ciclos de este turno
-        # ASUME que el modelo Grupo tiene un campo 'ciclo_semestral'
-        grupos_para_este_turno_objetos = list(Grupos.objects.filter(
+        self.logger.info(f"--- Iniciando generación para TURNO: {turno_codigo} (Ciclos: {ciclos_del_turno}) ---")
+        grupos_del_turno = Grupos.objects.filter(
             periodo=self.periodo,
-            ciclo_semestral__in=ciclos_del_turno # Usando el nuevo campo
-        ).select_related('materia', 'carrera'))
+            ciclo_semestral__in=ciclos_del_turno
+        ).prefetch_related('materias__requiere_tipo_espacio_especifico').order_by('ciclo_semestral')
 
-        if not grupos_para_este_turno_objetos:
-            self.logger.info(f"No hay grupos para programar en el Turno {turno_codigo}.")
+        if not grupos_del_turno:
+            self.logger.warning(f"No se encontraron grupos para el turno {turno_codigo}. Saltando...")
             return
 
-        grupos_priorizados_info = self._prioritize_grupos(grupos_para_este_turno_objetos)
         bloques_del_turno = [b for b in self.all_bloques_ordered if b.turno == turno_codigo]
+        clases_priorizadas = self._crear_lista_clases_para_programar(grupos_del_turno)
 
-        for grupo_info in grupos_priorizados_info:
-            grupo_obj = grupo_info['objeto']
-            self.logger.info(f"Procesando Grupo: {grupo_obj.codigo_grupo} ({grupo_obj.materia.nombre_materia}), Ciclo: {grupo_obj.ciclo_semestral}, Sesiones Requeridas: {grupo_info['sesiones_necesarias']}, Programadas: {grupo_info['sesiones_programadas']}")
+        clases_a_reintentar = []
 
-            while grupo_info['sesiones_programadas'] < grupo_info['sesiones_necesarias']:
-                self.logger.info(f"  Buscando sesión {grupo_info['sesiones_programadas'] + 1} de {grupo_info['sesiones_necesarias']} para {grupo_obj.codigo_grupo}...")
+        for clase_idx, clase_info in enumerate(clases_priorizadas):
+            # Necesitamos un objeto mutable para actualizar las sesiones programadas
+            clase_actual = clase_info
 
-                mejor_asignacion = self._find_best_assignment_for_session(grupo_info, bloques_del_turno)
+            sesiones_ya_programadas = self.horario_parcial_clases.get((clase_actual.grupo.grupo_id, clase_actual.materia.materia_id), 0)
 
-                if mejor_asignacion:
-                    asignacion_obj = HorariosAsignados.objects.create(
-                        grupo=mejor_asignacion["grupo"],
-                        docente=mejor_asignacion["docente"],
-                        espacio=mejor_asignacion["espacio"],
+            for i in range(clase_actual.sesiones_necesarias - sesiones_ya_programadas):
+                mejor_opcion, penalizacion = self._find_best_assignment_for_session(clase_actual, bloques_del_turno)
+
+                if mejor_opcion:
+                    docente, espacio, bloque = mejor_opcion
+                    self.logger.debug(
+                        f"[ASIGNACIÓN OK] Clase: {clase_actual.grupo.codigo_grupo}/{clase_actual.materia.codigo_materia} "
+                        f"en Bloque: {bloque.nombre_bloque} con Doc: {docente.codigo_docente}, "
+                        f"Esp: {espacio.nombre_espacio} (Penalización: {penalizacion})"
+                    )
+
+                    # Guardar en la base de datos
+                    HorariosAsignados.objects.create(
+                        grupo=clase_actual.grupo,
+                        materia=clase_actual.materia, # ¡Añadir la materia al horario!
+                        docente=docente,
+                        espacio=espacio,
                         periodo=self.periodo,
-                        dia_semana=mejor_asignacion["dia_semana"],
-                        bloque_horario=mejor_asignacion["bloque_horario"],
-                        estado="Programado"
+                        dia_semana=bloque.dia_semana,
+                        bloque_horario=bloque,
+                        estado='Programado'
                     )
-                    grupo_info['sesiones_programadas'] += 1
-                    self.generation_stats["sesiones_programadas_total"] +=1
-                    self.generation_stats["asignaciones_exitosas"] += 1
 
-                    # Actualizar horarios parciales para chequeos de carga y huecos
-                    doc_id = mejor_asignacion["docente"].docente_id
-                    esp_id = mejor_asignacion["espacio"].espacio_id
-                    g_id = mejor_asignacion["grupo"].grupo_id
-                    dia = mejor_asignacion["dia_semana"]
-                    bloque_id = mejor_asignacion["bloque_horario"].bloque_def_id
+                    # Actualizar estado parcial
+                    self.horario_parcial_docentes[docente.docente_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    self.horario_parcial_espacios[espacio.espacio_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    self.horario_parcial_grupos[clase_actual.grupo.grupo_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    self.horario_parcial_clases[(clase_actual.grupo.grupo_id, clase_actual.materia.materia_id)] += 1
 
-                    self.horario_parcial_docentes[doc_id][dia].append(bloque_id)
-                    self.horario_parcial_espacios[esp_id][dia].append(bloque_id)
-                    self.horario_parcial_grupos[g_id][dia].append(bloque_id)
-
-                    self.validator.mark_slot_used(docente_id=doc_id, espacio_id=esp_id, grupo_id=g_id, dia_semana=dia, bloque_id=bloque_id)
-
-                    self.logger.info(f"    ASIGNADO: Sesión {grupo_info['sesiones_programadas']} para {grupo_obj.codigo_grupo} en {mejor_asignacion['bloque_horario'].nombre_bloque} con D:{mejor_asignacion['docente'].codigo_docente} en E:{mejor_asignacion['espacio'].nombre_espacio}. Score: {mejor_asignacion['score']}")
                 else:
-                    self.unresolved_conflicts.append(
-                        f"Turno {turno_codigo}: No se pudo asignar la sesión {grupo_info['sesiones_programadas'] + 1} para {grupo_obj.codigo_grupo} ({grupo_obj.materia.nombre_materia})."
+                    self.logger.warning(
+                        f"[ASIGNACIÓN FALLIDA] No se encontró asignación para la sesión {i+1}/{clase_actual.sesiones_necesarias} "
+                        f"de la clase {clase_actual.grupo.codigo_grupo}/{clase_actual.materia.codigo_materia}. Se reintentará más tarde."
                     )
-                    self.logger.warning(f"    FALLO: No se pudo asignar sesión {grupo_info['sesiones_programadas'] + 1} para {grupo_obj.codigo_grupo}.")
+                    # Si no se encuentra una sesión, se podría añadir a una cola de reintento.
+                    # Por ahora, simplemente lo registramos.
+                    self.unresolved_conflicts.append(clase_actual)
+                    break # Dejar de intentar programar más sesiones para esta clase si una falla
+
+        self.logger.info(f"--- Finalizada generación para TURNO: {turno_codigo} ---")
+        self.generation_stats["sesiones_programadas_total"] += len(clases_priorizadas)
+        self.generation_stats["asignaciones_exitosas"] += len(clases_priorizadas) - len(clases_a_reintentar)
+        self.generation_stats["grupos_totalmente_programados"] += 1 if not clases_a_reintentar else 0
+        self.generation_stats["grupos_parcialmente_programados"] += 1 if clases_a_reintentar else 0
+        self.generation_stats["grupos_no_programados"] += 1 if not clases_priorizadas else 0
+
+    def generar_horario_para_grupo(self, grupo_id: int):
+        """
+        Genera el horario para un único grupo específico y sus materias asociadas.
+        Este es un punto de entrada más específico que el generador masivo por turnos.
+        """
+        self.logger.info(f"--- Iniciando generación específica para Grupo ID: {grupo_id} ---")
+        try:
+            grupo_obj = Grupos.objects.prefetch_related(
+                'materias__requiere_tipo_espacio_especifico'
+            ).get(grupo_id=grupo_id, periodo=self.periodo)
+        except Grupos.DoesNotExist:
+            self.logger.error(f"No se encontró el grupo con ID {grupo_id} en el período actual.")
+            return {"error": f"Grupo {grupo_id} no encontrado."}
+
+        # Borrar horario previo solo para este grupo
+        HorariosAsignados.objects.filter(grupo=grupo_obj).delete()
+        self.logger.info(f"Horario previo del grupo {grupo_obj.codigo_grupo} eliminado.")
+
+        clases_a_programar = self._crear_lista_clases_para_programar([grupo_obj])
+        if not clases_a_programar:
+            self.logger.warning(f"El grupo {grupo_obj.codigo_grupo} no tiene clases para programar.")
+            return {"warning": "El grupo no tiene clases para programar."}
+        
+        # Usar todos los bloques o filtrar por turno preferente del grupo si existe
+        bloques_disponibles = self.all_bloques_ordered
+        if grupo_obj.turno_preferente:
+            bloques_disponibles = [b for b in self.all_bloques_ordered if b.turno == grupo_obj.turno_preferente]
+            self.logger.info(f"Filtrando bloques para el turno preferente del grupo: {grupo_obj.turno_preferente}")
+
+        sesiones_exitosas = 0
+        sesiones_fallidas = 0
+
+        for clase_actual in clases_a_programar:
+            for i in range(clase_actual.sesiones_necesarias):
+                mejor_opcion, penalizacion = self._find_best_assignment_for_session(clase_actual, bloques_disponibles)
+
+                if mejor_opcion:
+                    docente, espacio, bloque = mejor_opcion
+                    self.logger.debug(f"[ASIGNACIÓN OK] Clase: {clase_actual.grupo.codigo_grupo}/{clase_actual.materia.codigo_materia} en Bloque: {bloque.nombre_bloque}")
+                    
+                    HorariosAsignados.objects.create(
+                        grupo=clase_actual.grupo, materia=clase_actual.materia,
+                        docente=docente, espacio=espacio, periodo=self.periodo,
+                        dia_semana=bloque.dia_semana, bloque_horario=bloque, estado='Programado'
+                    )
+
+                    self.horario_parcial_docentes[docente.docente_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    self.horario_parcial_espacios[espacio.espacio_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    self.horario_parcial_grupos[clase_actual.grupo.grupo_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                    sesiones_exitosas += 1
+                else:
+                    self.logger.warning(f"[ASIGNACIÓN FALLIDA] No se encontró hueco para la sesión {i+1} de {clase_actual.materia.codigo_materia}.")
+                    self.unresolved_conflicts.append(clase_actual)
+                    sesiones_fallidas += 1
                     break
+        
+        resumen = {
+            "grupo_procesado": grupo_obj.codigo_grupo,
+            "sesiones_exitosas": sesiones_exitosas,
+            "sesiones_fallidas": sesiones_fallidas,
+            "conflictos": [f"No se pudo programar la materia {c.materia.codigo_materia}" for c in self.unresolved_conflicts]
+        }
+        self.logger.info(f"--- Finalizada generación para Grupo ID: {grupo_id}. Resumen: {resumen} ---")
+        return resumen
 
-            if grupo_info['sesiones_necesarias'] > 0:
-                if grupo_info['sesiones_programadas'] == grupo_info['sesiones_necesarias']:
-                    self.generation_stats["grupos_totalmente_programados"] += 1
-                elif grupo_info['sesiones_programadas'] > 0:
-                    self.generation_stats["grupos_parcialmente_programados"] += 1
-                else:
-                    self.generation_stats["grupos_no_programados"] += 1
+    def generar_horarios_para_ciclo(self, ciclo_id: int):
+        """
+        Genera el horario para TODOS los grupos que pertenecen a un ciclo específico
+        dentro del período académico del servicio.
+        """
+        self.logger.info(f"--- Iniciando generación masiva para Ciclo ID: {ciclo_id} en Período: {self.periodo.nombre_periodo} ---")
+        
+        # 1. Encontrar la carrera y el orden del ciclo
+        try:
+            ciclo_obj = Ciclo.objects.get(pk=ciclo_id)
+            carrera_obj = ciclo_obj.carrera
+            ciclo_orden = ciclo_obj.orden
+        except Ciclo.DoesNotExist:
+            self.logger.error(f"El ciclo con ID {ciclo_id} no fue encontrado.")
+            return {"error": f"Ciclo {ciclo_id} no encontrado."}
+
+        # 2. Encontrar todos los grupos de la app 'scheduling' que corresponden a ese ciclo, carrera y período.
+        grupos_del_ciclo = Grupos.objects.filter(
+            periodo=self.periodo,
+            carrera=carrera_obj,
+            ciclo_semestral=ciclo_orden
+        ).prefetch_related('materias')
+
+        if not grupos_del_ciclo.exists():
+            msg = f"No se encontraron grupos para el ciclo {ciclo_orden} de la carrera '{carrera_obj.nombre_carrera}' en el período '{self.periodo.nombre_periodo}'."
+            self.logger.warning(msg)
+            return {"warning": msg}
+        
+        self.logger.info(f"Se encontraron {len(grupos_del_ciclo)} grupos para procesar: {[g.codigo_grupo for g in grupos_del_ciclo]}")
+
+        # 3. Borrar los horarios existentes para estos grupos
+        HorariosAsignados.objects.filter(grupo__in=grupos_del_ciclo).delete()
+        self.logger.info(f"Eliminados los horarios previos para los {len(grupos_del_ciclo)} grupos del ciclo.")
+
+        # 4. Crear la lista completa de clases a programar para todos los grupos
+        clases_a_programar = self._crear_lista_clases_para_programar(grupos_del_ciclo)
+        
+        bloques_disponibles = self.all_bloques_ordered # Usar todos los bloques
+        
+        # 5. Iterar y asignar
+        resumen_total = {"grupos_procesados": [], "total_sesiones_exitosas": 0, "total_sesiones_fallidas": 0}
+
+        for grupo in grupos_del_ciclo:
+            clases_del_grupo = [c for c in clases_a_programar if c.grupo.grupo_id == grupo.grupo_id]
+            sesiones_exitosas_grupo = 0
+            sesiones_fallidas_grupo = 0
+
+            for clase_actual in clases_del_grupo:
+                for i in range(clase_actual.sesiones_necesarias):
+                    mejor_opcion, _ = self._find_best_assignment_for_session(clase_actual, bloques_disponibles)
+                    if mejor_opcion:
+                        docente, espacio, bloque = mejor_opcion
+                        HorariosAsignados.objects.create(
+                            grupo=clase_actual.grupo, materia=clase_actual.materia,
+                            docente=docente, espacio=espacio, periodo=self.periodo,
+                            dia_semana=bloque.dia_semana, bloque_horario=bloque, estado='Programado'
+                        )
+                        self.horario_parcial_docentes[docente.docente_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                        self.horario_parcial_espacios[espacio.espacio_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                        self.horario_parcial_grupos[grupo.grupo_id][bloque.dia_semana].append(bloque.bloque_def_id)
+                        sesiones_exitosas_grupo += 1
+                    else:
+                        self.unresolved_conflicts.append(clase_actual)
+                        sesiones_fallidas_grupo += 1
+                        break # No seguir con esta materia si una sesión falla
+            
+            resumen_total["grupos_procesados"].append({
+                "codigo_grupo": grupo.codigo_grupo,
+                "sesiones_exitosas": sesiones_exitosas_grupo,
+                "sesiones_fallidas": sesiones_fallidas_grupo
+            })
+            resumen_total["total_sesiones_exitosas"] += sesiones_exitosas_grupo
+            resumen_total["total_sesiones_fallidas"] += sesiones_fallidas_grupo
+
+        self.logger.info(f"--- Finalizada generación masiva para Ciclo ID: {ciclo_id}. Resumen: {resumen_total} ---")
+        return resumen_total
 
     def generar_horarios_automaticos(self):
         self.logger.info(f"=== Iniciando generación de horarios para el período: {self.periodo.nombre_periodo} ===")
@@ -378,17 +524,20 @@ class ScheduleGeneratorService:
         self.horario_parcial_docentes.clear()
         self.horario_parcial_espacios.clear()
         self.horario_parcial_grupos.clear()
+        self.horario_parcial_clases.clear()
 
-        todos_grupos_del_periodo_obj = list(Grupos.objects.filter(periodo=self.periodo).select_related('materia'))
+        todos_grupos_del_periodo_obj = list(Grupos.objects.filter(periodo=self.periodo).prefetch_related('materias'))
         total_sesiones_req = 0
         for g in todos_grupos_del_periodo_obj:
-            horas_materia = g.materia.horas_totales
-            sesiones_para_este_grupo = 0
-            if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
-                sesiones_para_este_grupo = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
-            elif horas_materia > 0:
-                sesiones_para_este_grupo = 1
-            total_sesiones_req += sesiones_para_este_grupo
+            # Ahora cada grupo puede tener múltiples materias
+            for materia in g.materias.all():
+                horas_materia = materia.horas_totales
+                sesiones_para_este_grupo = 0
+                if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
+                    sesiones_para_este_grupo = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
+                elif horas_materia > 0:
+                    sesiones_para_este_grupo = 1
+                total_sesiones_req += sesiones_para_este_grupo
         self.generation_stats["sesiones_requeridas_total"] = total_sesiones_req
 
         for turno_cod, ciclos_del_turno in TURNOS_CICLOS_MAP.items():

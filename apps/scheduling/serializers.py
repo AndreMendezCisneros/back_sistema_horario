@@ -6,15 +6,41 @@ from apps.users.serializers import DocentesSerializer
 from apps.academic_setup.models import PeriodoAcademico
 
 class GruposSerializer(serializers.ModelSerializer):
-    materia_detalle = MateriasSerializer(source='materia', read_only=True)
+    materias_detalle = MateriasSerializer(source='materias', many=True, read_only=True)
     carrera_detalle = CarreraSerializer(source='carrera', read_only=True)
     periodo_nombre = serializers.CharField(source='periodo.nombre_periodo', read_only=True)
-    docente_asignado_directamente_nombre = serializers.CharField(source='docente_asignado_directamente.__str__', read_only=True, allow_null=True)
+    docente_asignado_directamente_nombre = serializers.SerializerMethodField()
 
+    def get_docente_asignado_directamente_nombre(self, obj):
+        if obj.docente_asignado_directamente:
+            docente = obj.docente_asignado_directamente
+            return f"{docente.nombres} {docente.apellidos}"
+        return None
+
+    def validate(self, data):
+        print(f"[GruposSerializer] Validando datos: {data}")
+        
+        # Verificar restricción unique_together
+        codigo_grupo = data.get('codigo_grupo')
+        periodo = data.get('periodo')
+        
+        if codigo_grupo and periodo:
+            # Excluir el grupo actual si estamos actualizando
+            instance = self.instance
+            queryset = Grupos.objects.filter(codigo_grupo=codigo_grupo, periodo=periodo)
+            if instance:
+                queryset = queryset.exclude(pk=instance.pk)
+            
+            if queryset.exists():
+                raise serializers.ValidationError({
+                    'codigo_grupo': f'Ya existe un grupo con el código "{codigo_grupo}" en el período seleccionado.'
+                })
+        
+        return data
 
     class Meta:
         model = Grupos
-        fields = ['grupo_id', 'codigo_grupo', 'materia', 'materia_detalle', 'carrera', 'carrera_detalle',
+        fields = ['grupo_id', 'codigo_grupo', 'materias', 'materias_detalle', 'carrera', 'carrera_detalle',
                   'periodo', 'periodo_nombre', 'numero_estudiantes_estimado', 'turno_preferente',
                   'docente_asignado_directamente', 'docente_asignado_directamente_nombre']
 

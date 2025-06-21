@@ -53,6 +53,7 @@ class EspecialidadesSerializer(serializers.ModelSerializer):
 class MateriasSerializer(serializers.ModelSerializer):
     requiere_tipo_espacio_nombre = serializers.CharField(source='requiere_tipo_espacio_especifico.nombre_tipo_espacio', read_only=True, allow_null=True)
     horas_totales = serializers.ReadOnlyField()
+    
     class Meta:
         model = Materias
         fields = ['materia_id', 'codigo_materia', 'nombre_materia', 'descripcion',
