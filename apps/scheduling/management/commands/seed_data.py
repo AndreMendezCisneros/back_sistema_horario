@@ -314,16 +314,16 @@ class Command(BaseCommand):
             user, created = User.objects.get_or_create(
                 username=username,
                 defaults={
+                    'email': email,
                     'first_name': nombre,
                     'last_name': apellido,
-                    'email': email,
-                    'is_staff': True # Para que puedan acceder al admin si se desea
+                    'is_active': True # Activamos el usuario por defecto
                 }
             )
             if created:
                 user.set_password('password123') # Contraseña por defecto
-                user.groups.add(grupo_docentes)
                 user.save()
+            user.groups.add(grupo_docentes)
 
             doc, _ = Docentes.objects.get_or_create(
                 usuario=user,
@@ -417,22 +417,26 @@ class Command(BaseCommand):
                     grupo, created = Grupos.objects.get_or_create(
                         codigo_grupo=cod_grupo,
                         periodo=periodo,
-                        materia=materia,
-                        carrera=carrera_sel, # Añadir carrera a los campos de búsqueda para get_or_create si la combinación debe ser única
+                        carrera=carrera_sel,
                         defaults={
-                            'ciclo_semestral': ciclo_sugerido_val, # <--- NUEVO CAMPO ASIGNADO
+                            'ciclo_semestral': ciclo_sugerido_val,
                             'numero_estudiantes_estimado': random.randint(15, 40),
                             'turno_preferente': random.choice(['M', 'T', 'N', None]),
-                            'docente_asignado_directamente': random.choice(docentes) if random.random() < 0.1 else None # 10% pre-asignado
+                            'docente_asignado_directamente': random.choice(docentes) if random.random() < 0.1 else None
                         }
                     )
+
+                    # Asignar la materia después de crear el grupo
                     if created:
+                        grupo.materias.set([materia])
                         grupos.append(grupo)
-                    else: # Si ya existía (por código_grupo y periodo), actualizar el ciclo si es necesario
+                    else:
                         if grupo.ciclo_semestral != ciclo_sugerido_val:
                             grupo.ciclo_semestral = ciclo_sugerido_val
                             grupo.save()
-                        grupos.append(grupo) # Añadir también los existentes para la lógica posterior
+                        # Asegurarse de que la materia esté asignada incluso si el grupo ya existía
+                        grupo.materias.add(materia)
+                        grupos.append(grupo)
 
         self.stdout.write(self.style.SUCCESS(f"Se generaron/actualizaron {len(grupos)} grupos."))
         return grupos
