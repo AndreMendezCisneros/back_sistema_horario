@@ -65,13 +65,13 @@ class DocentesSerializer(serializers.ModelSerializer):
     unidad_principal_nombre = serializers.CharField(source='unidad_principal.nombre_unidad', read_only=True, allow_null=True)
     # Mostrar especialidades de forma más detallada o simple
     especialidades_detalle = EspecialidadesSerializer(source='especialidades', many=True, read_only=True) # ManyToManyField
-    # Para la creación/actualización de especialidades, podríamos necesitar un campo write_only
-    especialidad_ids = serializers.PrimaryKeyRelatedField(
+    
+    # Campo para recibir los IDs de las especialidades al crear/actualizar
+    especialidades = serializers.PrimaryKeyRelatedField(
         queryset=Especialidades.objects.all(),
-        source='especialidades',
         many=True,
         write_only=True,
-        required=False
+        required=False  # No es obligatorio que un docente tenga especialidades
     )
 
 
@@ -79,20 +79,20 @@ class DocentesSerializer(serializers.ModelSerializer):
         model = Docentes
         fields = ['docente_id', 'usuario', 'usuario_username', 'codigo_docente', 'nombres', 'apellidos', 'dni',
                   'email', 'telefono', 'tipo_contrato', 'max_horas_semanales',
-                  'unidad_principal', 'unidad_principal_nombre', 'especialidades_detalle', 'especialidad_ids']
+                  'unidad_principal', 'unidad_principal_nombre', 'especialidades_detalle', 'especialidades']
 
     def create(self, validated_data):
-        especialidad_data = validated_data.pop('especialidades', None)
+        especialidades_data = validated_data.pop('especialidades', [])
         docente = Docentes.objects.create(**validated_data)
-        if especialidad_data:
-            docente.especialidades.set(especialidad_data)
+        docente.especialidades.set(especialidades_data)
         return docente
 
     def update(self, instance, validated_data):
-        especialidad_data = validated_data.pop('especialidades', None)
+        especialidades_data = validated_data.pop('especialidades', None)
         instance = super().update(instance, validated_data)
-        if especialidad_data is not None: # Permite limpiar especialidades si se envía lista vacía
-            instance.especialidades.set(especialidad_data)
+        # Solo actualiza si 'especialidades' fue incluido en la petición
+        if especialidades_data is not None:
+            instance.especialidades.set(especialidades_data)
         return instance
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
