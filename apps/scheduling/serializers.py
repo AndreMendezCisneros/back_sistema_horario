@@ -38,6 +38,24 @@ class GruposSerializer(serializers.ModelSerializer):
         
         return data
 
+    def create(self, validated_data):
+        materias_data = validated_data.pop('materias')
+        grupo = Grupos.objects.create(**validated_data)
+        grupo.materias.set(materias_data)
+        return grupo
+
+    def update(self, instance, validated_data):
+        materias_data = validated_data.pop('materias', None)
+        
+        # Actualizar campos del modelo base
+        instance = super().update(instance, validated_data)
+
+        # Actualizar la relación ManyToMany si se proporcionaron datos
+        if materias_data is not None:
+            instance.materias.set(materias_data)
+            
+        return instance
+
     class Meta:
         model = Grupos
         fields = ['grupo_id', 'codigo_grupo', 'materias', 'materias_detalle', 'carrera', 'carrera_detalle',

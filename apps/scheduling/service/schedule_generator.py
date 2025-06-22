@@ -182,11 +182,11 @@ class ScheduleGeneratorService:
         for g in grupos_del_turno:
             for materia_obj in g.materias.all(): # Iterar sobre todas las materias del grupo
                 horas_materia = materia_obj.horas_totales
-                sesiones_necesarias = 0
-                if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
-                    sesiones_necesarias = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
-                elif horas_materia > 0:
-                    sesiones_necesarias = 1
+            sesiones_necesarias = 0
+            if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
+                sesiones_necesarias = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
+            elif horas_materia > 0:
+                sesiones_necesarias = 1
 
                 if sesiones_necesarias > 0:
                     clase = ClaseParaProgramar(
@@ -428,7 +428,7 @@ class ScheduleGeneratorService:
                     self.unresolved_conflicts.append(clase_actual)
                     sesiones_fallidas += 1
                     break
-        
+
         resumen = {
             "grupo_procesado": grupo_obj.codigo_grupo,
             "sesiones_exitosas": sesiones_exitosas,
@@ -499,7 +499,7 @@ class ScheduleGeneratorService:
                         self.horario_parcial_espacios[espacio.espacio_id][bloque.dia_semana].append(bloque.bloque_def_id)
                         self.horario_parcial_grupos[grupo.grupo_id][bloque.dia_semana].append(bloque.bloque_def_id)
                         sesiones_exitosas_grupo += 1
-                    else:
+                else:
                         self.unresolved_conflicts.append(clase_actual)
                         sesiones_fallidas_grupo += 1
                         break # No seguir con esta materia si una sesión falla
@@ -532,12 +532,12 @@ class ScheduleGeneratorService:
             # Ahora cada grupo puede tener múltiples materias
             for materia in g.materias.all():
                 horas_materia = materia.horas_totales
-                sesiones_para_este_grupo = 0
-                if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
-                    sesiones_para_este_grupo = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
-                elif horas_materia > 0:
-                    sesiones_para_este_grupo = 1
-                total_sesiones_req += sesiones_para_este_grupo
+            sesiones_para_este_grupo = 0
+            if HORAS_ACADEMICAS_POR_SESION_ESTANDAR > 0 and horas_materia > 0:
+                sesiones_para_este_grupo = (horas_materia + HORAS_ACADEMICAS_POR_SESION_ESTANDAR - 1) // HORAS_ACADEMICAS_POR_SESION_ESTANDAR
+            elif horas_materia > 0:
+                sesiones_para_este_grupo = 1
+            total_sesiones_req += sesiones_para_este_grupo
         self.generation_stats["sesiones_requeridas_total"] = total_sesiones_req
 
         for turno_cod, ciclos_del_turno in TURNOS_CICLOS_MAP.items():

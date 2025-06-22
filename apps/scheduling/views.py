@@ -32,14 +32,39 @@ class GruposViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['carrera', 'periodo', 'ciclo_semestral', 'turno_preferente']
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # Obtener la instancia completa con prefetch para la respuesta
+        instance = Grupos.objects.select_related(
+            'carrera', 'periodo'
+        ).prefetch_related('materias').get(pk=serializer.instance.pk)
+        
+        # Serializar la instancia completa para la respuesta
+        response_serializer = self.get_serializer(instance)
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def update(self, request, *args, **kwargs):
         print(f"[GruposViewSet] Actualizando grupo {kwargs.get('pk')}")
         print(f"[GruposViewSet] Datos recibidos: {request.data}")
-        try:
-            return super().update(request, *args, **kwargs)
-        except Exception as e:
-            print(f"[GruposViewSet] Error en update: {str(e)}")
-            raise
+        
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been used, we need to reload the instance
+            # from the database to get the updated M2M fields.
+            instance = self.get_object()
+            
+        # Serializar la instancia completa y actualizada para la respuesta
+        response_serializer = self.get_serializer(instance)
+        return Response(response_serializer.data)
 
     @action(detail=True, methods=['post'], url_path='generar-horario')
     def generar_horario(self, request, pk=None):
@@ -75,6 +100,7 @@ class BloquesHorariosDefinicionViewSet(viewsets.ModelViewSet):
     queryset = BloquesHorariosDefinicion.objects.all()
     serializer_class = BloquesHorariosDefinicionSerializer
     permission_classes = [permissions.AllowAny]
+    pagination_class = None # Deshabilitar paginación para este ViewSet
 
 
 class DisponibilidadDocentesViewSet(viewsets.ModelViewSet):
@@ -87,9 +113,20 @@ class DisponibilidadDocentesViewSet(viewsets.ModelViewSet):
 
 
 class HorariosAsignadosViewSet(viewsets.ModelViewSet):
-    queryset = HorariosAsignados.objects.select_related('grupo', 'docente', 'espacio', 'periodo', 'bloque_horario', 'materia').all()
+    queryset = HorariosAsignados.objects.select_related(
+        'grupo__carrera', 'docente', 'espacio', 'periodo', 'bloque_horario', 'materia'
+    ).all()
     serializer_class = HorariosAsignadosSerializer
     permission_classes = [permissions.AllowAny]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = {
+        'periodo': ['exact'],
+        'grupo': ['exact', 'in'],
+        'docente': ['exact', 'in'],
+        'espacio': ['exact', 'in'],
+        'dia_semana': ['exact'],
+        'grupo__carrera': ['exact'],
+    }
 
 
 class ConfiguracionRestriccionesViewSet(viewsets.ModelViewSet):

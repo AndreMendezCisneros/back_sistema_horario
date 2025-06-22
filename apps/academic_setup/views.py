@@ -81,13 +81,16 @@ class CicloViewSet(viewsets.ModelViewSet):
     queryset = Ciclo.objects.select_related('carrera').all()
     serializer_class = CicloSerializer
     permission_classes = [AllowAny] # Ajusta los permisos
+    pagination_class = None # Deshabilitar paginación para este ViewSet
 
     # Permite filtrar ciclos por carrera_id: /api/academic_setup/ciclos/?carrera_id=X
     def get_queryset(self):
         queryset = super().get_queryset()
         carrera_id = self.request.query_params.get('carrera_id')
+        print(f"Buscando ciclos para carrera_id: {carrera_id}") # <-- DEBUG
         if carrera_id:
             queryset = queryset.filter(carrera_id=carrera_id)
+        print(f"Encontrados {queryset.count()} ciclos.") # <-- DEBUG
         return queryset
 
     @action(detail=True, methods=['post'], url_path='generar-horarios')
@@ -189,11 +192,19 @@ class CarreraViewSet(viewsets.ModelViewSet):
         if ciclo_id:
             carrera_materias_qs = carrera_materias_qs.filter(ciclo_id=ciclo_id)
 
-        # Extraemos solo los objetos Materia de la relación
-        materias_list = [cm.materia for cm in carrera_materias_qs]
-        
-        # Serializamos los objetos Materia
-        serializer = MateriasSerializer(materias_list, many=True)
+        # Extraemos los IDs de las materias
+        materia_ids = [cm.materia.materia_id for cm in carrera_materias_qs]
+        # Creamos un queryset de Materias
+        materias_queryset = Materias.objects.filter(materia_id__in=materia_ids)
+
+        # Aplicamos la paginación al queryset
+        page = self.paginate_queryset(materias_queryset)
+        if page is not None:
+            serializer = MateriasSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        # Fallback por si la paginación no está activa
+        serializer = MateriasSerializer(materias_queryset, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='crear-grupos-masivos')

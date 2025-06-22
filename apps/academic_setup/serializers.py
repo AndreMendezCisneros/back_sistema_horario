@@ -53,12 +53,52 @@ class EspecialidadesSerializer(serializers.ModelSerializer):
 class MateriasSerializer(serializers.ModelSerializer):
     requiere_tipo_espacio_nombre = serializers.CharField(source='requiere_tipo_espacio_especifico.nombre_tipo_espacio', read_only=True, allow_null=True)
     horas_totales = serializers.ReadOnlyField()
+    # Ahora 'carreras' es una lista de IDs y ya no es write_only para poder mostrarlo si es necesario
+    carreras = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False
+    )
+    ciclo_id = serializers.IntegerField(write_only=True, required=False, help_text="ID del ciclo al que pertenece la materia en esta carrera.")
+
     
     class Meta:
         model = Materias
         fields = ['materia_id', 'codigo_materia', 'nombre_materia', 'descripcion',
                   'horas_academicas_teoricas', 'horas_academicas_practicas', 'horas_academicas_laboratorio', 'horas_totales',
-                  'requiere_tipo_espacio_especifico', 'requiere_tipo_espacio_nombre', 'estado']
+                  'requiere_tipo_espacio_especifico', 'requiere_tipo_espacio_nombre', 'estado',
+                  'carreras', 'ciclo_id'] # Cambiado a 'carreras'
+
+    def create(self, validated_data):
+        carreras_ids = validated_data.pop('carreras', [])
+        ciclo_id = validated_data.pop('ciclo_id', None)
+        
+        # Crear la materia
+        materia = Materias.objects.create(**validated_data)
+        
+        # Si se proveyó una lista de carreras, crear las asociaciones
+        if carreras_ids:
+            ciclo = None
+            # La lógica del ciclo solo aplica si se eligió UNA SOLA carrera
+            if len(carreras_ids) == 1 and ciclo_id:
+                try:
+                    ciclo = Ciclo.objects.get(pk=ciclo_id, carrera_id=carreras_ids[0])
+                except Ciclo.DoesNotExist:
+                    pass # El ciclo no existe o no pertenece a esa carrera, se ignora
+
+            for carrera_id in carreras_ids:
+                try:
+                    carrera = Carrera.objects.get(pk=carrera_id)
+                    # El ciclo solo se asigna si es aplicable (caso de una sola carrera)
+                    ciclo_para_asignar = ciclo if len(carreras_ids) == 1 else None
+                    CarreraMaterias.objects.create(
+                        carrera=carrera, 
+                        materia=materia,
+                        ciclo=ciclo_para_asignar
+                    )
+                except Carrera.DoesNotExist:
+                    # Ignorar si una de las carreras de la lista no existe
+                    continue
+
+        return materia
 
 # Nuevo Serializer: Ciclo
 class CicloSerializer(serializers.ModelSerializer):

@@ -27,6 +27,7 @@ class Grupos(models.Model):
         unique_together = ('codigo_grupo', 'periodo')
         verbose_name = "Grupo/Sección"
         verbose_name_plural = "Grupos/Secciones"
+        ordering = ['-grupo_id']
 
 class BloquesHorariosDefinicion(models.Model):
     TURNO_CHOICES = [('M', 'Mañana'), ('T', 'Tarde'), ('N', 'Noche')]
