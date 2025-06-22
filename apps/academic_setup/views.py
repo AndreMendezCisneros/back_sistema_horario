@@ -283,6 +283,7 @@ class EspaciosFisicosViewSet(viewsets.ModelViewSet):
     queryset = EspaciosFisicos.objects.select_related('tipo_espacio', 'unidad').all()
     serializer_class = EspaciosFisicosSerializer
     permission_classes = [AllowAny]
+
     def get_queryset(self):
         queryset = super().get_queryset()
         unidad_id = self.request.query_params.get('unidad_id')
