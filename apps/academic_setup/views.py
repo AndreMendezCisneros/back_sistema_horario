@@ -345,3 +345,12 @@ class MateriaEspecialidadesRequeridasViewSet(viewsets.ModelViewSet):
     queryset = MateriaEspecialidadesRequeridas.objects.select_related('materia', 'especialidad').all()
     serializer_class = MateriaEspecialidadesRequeridasSerializer
     permission_classes = [AllowAny]
+
+    @action(detail=False, methods=['get'], url_path='por-materia')
+    def por_materia(self, request):
+        materia_id = request.query_params.get('materia')
+        if not materia_id:
+            return Response({'error': 'Se requiere el parámetro materia'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.get_queryset().filter(materia_id=materia_id)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)

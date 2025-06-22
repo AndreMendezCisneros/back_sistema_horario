@@ -74,6 +74,26 @@ class DocentesViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(especialidades__especialidad_id=especialidad_id).distinct()
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='por-especialidad')
+    def por_especialidad(self, request):
+        especialidad_id = request.query_params.get('especialidad_id')
+        if not especialidad_id:
+            return Response({'error': 'Se requiere el parámetro especialidad_id'}, status=status.HTTP_400_BAD_REQUEST)
+        qs = self.get_queryset().filter(especialidades__especialidad_id=especialidad_id).distinct()
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='por-materia')
+    def por_materia(self, request):
+        materia_id = request.query_params.get('materia_id')
+        if not materia_id:
+            return Response({'error': 'Se requiere el parámetro materia_id'}, status=status.HTTP_400_BAD_REQUEST)
+        from apps.academic_setup.models import MateriaEspecialidadesRequeridas
+        especialidades = MateriaEspecialidadesRequeridas.objects.filter(materia_id=materia_id).values_list('especialidad_id', flat=True)
+        qs = self.get_queryset().filter(especialidades__especialidad_id__in=especialidades).distinct()
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
 # Para login y refresh de tokens
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer

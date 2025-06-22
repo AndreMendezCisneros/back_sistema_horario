@@ -128,6 +128,21 @@ class HorariosAsignadosViewSet(viewsets.ModelViewSet):
         'grupo__carrera': ['exact'],
     }
 
+    def create(self, request, *args, **kwargs):
+        data = request.data
+        materia_id = data.get('materia')
+        docente_id = data.get('docente')
+        if materia_id and docente_id:
+            from apps.academic_setup.models import MateriaEspecialidadesRequeridas
+            from apps.users.models import DocenteEspecialidades
+            # Especialidades requeridas por la materia
+            especialidades_requeridas = set(MateriaEspecialidadesRequeridas.objects.filter(materia_id=materia_id).values_list('especialidad_id', flat=True))
+            # Especialidades del docente
+            especialidades_docente = set(DocenteEspecialidades.objects.filter(docente_id=docente_id).values_list('especialidad_id', flat=True))
+            if especialidades_requeridas and not (especialidades_requeridas & especialidades_docente):
+                return Response({'error': 'El docente seleccionado no tiene ninguna de las especialidades requeridas por la materia.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().create(request, *args, **kwargs)
+
 
 class ConfiguracionRestriccionesViewSet(viewsets.ModelViewSet):
     queryset = ConfiguracionRestricciones.objects.select_related('periodo_aplicable').all()
