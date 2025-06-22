@@ -86,8 +86,10 @@ class DisponibilidadDocentesSerializer(serializers.ModelSerializer):
                   'esta_disponible', 'preferencia', 'origen_carga', 'origen_carga_display']
 
 class HorariosAsignadosSerializer(serializers.ModelSerializer):
-    grupo_detalle = GruposSerializer(source='grupo', read_only=True)
+    # Serializadores anidados para devolver los detalles en las respuestas GET
+    materia_detalle = MateriasSerializer(source='materia', read_only=True)
     docente_detalle = DocentesSerializer(source='docente', read_only=True)
+    grupo_detalle = GruposSerializer(source='grupo', read_only=True)
     espacio_detalle = EspaciosFisicosSerializer(source='espacio', read_only=True)
     periodo_nombre = serializers.CharField(source='periodo.nombre_periodo', read_only=True)
     dia_semana_display = serializers.CharField(source='get_dia_semana_display', read_only=True)
@@ -97,11 +99,16 @@ class HorariosAsignadosSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = HorariosAsignados
-        fields = ['horario_id', 'grupo', 'grupo_detalle', 'docente', 'docente_detalle',
-                  'espacio', 'espacio_detalle', 'periodo', 'periodo_nombre',
-                  'dia_semana', 'dia_semana_display', 'bloque_horario', 'bloque_horario_detalle',
-                  'estado', 'estado_display', 'observaciones']
-        # Validar unique_together en el serializador si es necesario, aunque el modelo ya lo hace.
+        # Asegurarse de que 'materia' esté en la lista de campos para que sea procesado
+        fields = [
+            'horario_id', 'grupo', 'materia', 'docente', 'espacio', 'periodo', 
+            'dia_semana', 'bloque_horario', 'estado', 'observaciones',
+            # Campos de detalle para lectura
+            'grupo_detalle', 'materia_detalle', 'docente_detalle', 'espacio_detalle', 
+            'periodo_nombre', 'dia_semana_display', 'bloque_horario_detalle', 'estado_display'
+        ]
+        # 'materia' es un campo de escritura (FK), no debe ser read_only aquí.
+        # Los campos de detalle como 'materia_detalle' sí son read_only por definición.
 
 class ConfiguracionRestriccionesSerializer(serializers.ModelSerializer):
     periodo_aplicable_nombre = serializers.CharField(source='periodo_aplicable.nombre_periodo', read_only=True, allow_null=True)
