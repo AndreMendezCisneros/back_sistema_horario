@@ -121,16 +121,15 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'last_name': user.last_name,
             # Convierte los grupos a una lista de nombres de strings
             'groups': [group.name for group in user.groups.all()],
-            # Si Docente está relacionado, puedes incluir sus especialidades aquí
-            # Ejemplo (asumiendo una relación inversa 'docente_profile' o 'docente'):
-            # 'especialidades_nombres': []
         }
         # Si el usuario es un docente y tiene un perfil de docente asociado
-        if hasattr(user, 'docente') and user.docente:
+        if hasattr(user, 'perfil_docente'):
+            docente = user.perfil_docente
+            user_data['docente_id'] = docente.docente_id
             user_data['especialidades_nombres'] = [
-                esp.nombre for esp in user.docente.especialidades.all()
+                esp.nombre_especialidad for esp in docente.especialidades.all()
             ]
 
-        data['user'] = user_data
+        data['user_data'] = user_data
         return data
     
